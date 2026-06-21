@@ -1,38 +1,27 @@
 #!/usr/bin/env python3
 """
-Collecte périodique des données publiques d'Empire Immo, pour TOUS les mondes
-listés dans config/worlds.json.
+fetch_data.py — Récupère les données publiques d'Empire Immo pour chaque
+monde déclaré dans config/worlds.json, et ajoute (append) les relevés aux
+fichiers JSONL d'historique correspondants.
 
-config/worlds.json est maintenu manuellement (par l'utilisateur du repo, pas
-par ce script) car la liste des mondes change rarement. Format attendu :
+Mondes : définis manuellement par l'utilisateur dans config/worlds.json,
+à la racine du dépôt (un id + un nom + une base_url par monde). Ce script
+ne doit jamais être modifié pour ajouter un monde — il suffit d'éditer ce
+fichier de config.
 
-{
-  "mondes": [
-    {
-      "id": "monde8",
-      "nom": "Monde 8",
-      "buildings_url": "https://monde8.empireimmo.com/api/buildings.json",
-      "materials_url": "https://monde8.empireimmo.com/api/materials.json"
-    },
-    ...
-  ]
-}
+Chaque (monde, source) est traité indépendamment : l'échec de l'un n'empêche
+jamais les autres de continuer (réseau capricieux, monde temporairement down...).
 
-Pour chaque monde, buildings_url et materials_url sont interrogées
-indépendamment (jamais players_url, même si elle existe : pas de suivi de
-joueurs demandé). L'échec d'une source, sur un monde, n'empêche jamais la
-collecte des autres sources/mondes.
+Fichier produit : data/history/<world_id>/<source>.jsonl, une ligne par relevé :
+{"fetched_at": "<ISO8601 UTC>", "source_mise_a_jour": <valeur ou null>, "data": {...}}
 
-Pour chaque (monde, source) qui réussit, une ligne JSONL est ajoutée à
-data/history/<monde_id>/<source>.jsonl au format :
-    {"fetched_at": "<ISO8601 UTC>", "source_mise_a_jour": <valeur ou null>, "data": {...}}
+⚠️ players.json existe mais n'est volontairement jamais interrogé ici
+   (pas de suivi de joueurs demandé).
 
 Code de sortie :
-    0 si au moins un (monde, source) a réussi
-    1 si tout a échoué, ou si config/worlds.json est absent/invalide
+  0 si au moins un (monde, source) a été récupéré avec succès
+  1 si tout a échoué
 """
-from __future__ import annotations
-
 import json
 import sys
 from datetime import datetime, timezone
@@ -40,137 +29,80 @@ from pathlib import Path
 
 import requests
 
-TIMEOUT_SECONDS = 20
+ROOT = Path(__file__).resolve().parent.parent
+WORLDS_CONFIG = ROOT / "config" / "worlds.json"
+HISTORY_DIR = ROOT / "data" / "history"
+TIMEOUT = 20
 
-# Clés d'URL à interroger pour chaque monde (jamais "players_url").
-SOURCE_URL_KEYS = {
-    "buildings": "buildings_url",
-    "materials": "materials_url",
-}
-
-MISE_A_JOUR_KEYS = (
-    "mise_a_jour",
-    "maj",
-    "updated_at",
-    "last_update",
-    "last_updated",
-    "date_maj",
-)
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-WORLDS_CONFIG_PATH = ROOT_DIR / "config" / "worlds.json"
-HISTORY_DIR = ROOT_DIR / "data" / "history"
+# Sources interrogées pour chaque monde (players.json est exclu volontairement).
+SOURCES = ("buildings", "materials")
 
 
 def load_worlds() -> list[dict]:
-    """Charge la liste des mondes depuis config/worlds.json.
-
-    Ce fichier est maintenu à la main ; on reste donc défensif sur son
-    contenu (champs manquants, monde mal formé...) plutôt que de planter.
-    """
-    if not WORLDS_CONFIG_PATH.exists():
-        print(f"[fetch_data] ERREUR : {WORLDS_CONFIG_PATH} introuvable.", file=sys.stderr)
+    if not WORLDS_CONFIG.exists():
+        print(f"⚠️  Fichier de configuration introuvable : {WORLDS_CONFIG}", file=sys.stderr)
+        return []
+    try:
+        worlds = json.loads(WORLDS_CONFIG.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"⚠️  config/worlds.json invalide (JSON mal formé) : {e}", file=sys.stderr)
         return []
 
-    try:
-        raw = json.loads(WORLDS_CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"[fetch_data] ERREUR lecture {WORLDS_CONFIG_PATH} : {exc}", file=sys.stderr)
-        return []
-
-    mondes = raw.get("mondes", []) if isinstance(raw, dict) else []
-    valides = []
-    for monde in mondes:
-        if not isinstance(monde, dict):
-            continue
-        monde_id = monde.get("id")
-        if not monde_id:
-            print(f"[fetch_data] Monde sans 'id' ignoré : {monde}", file=sys.stderr)
-            continue
-        valides.append(monde)
-    return valides
+    valid = []
+    for w in worlds:
+        if isinstance(w, dict) and w.get("id") and w.get("base_url"):
+            valid.append(w)
+        else:
+            print(f"⚠️  Entrée de monde ignorée (id ou base_url manquant) : {w}", file=sys.stderr)
+    return valid
 
 
-def _extract_source_mise_a_jour(payload: object) -> object | None:
-    if not isinstance(payload, dict):
-        return None
-    for key in MISE_A_JOUR_KEYS:
-        if key in payload:
-            return payload[key]
-    return None
+def fetch_source(base_url: str, source: str) -> dict:
+    url = base_url.rstrip("/") + f"/{source}.json"
+    resp = requests.get(url, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
 
-def fetch_url(url: str) -> dict | None:
-    try:
-        response = requests.get(url, timeout=TIMEOUT_SECONDS)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:
-        print(f"[fetch_data] ÉCHEC requête '{url}' : {exc}", file=sys.stderr)
-        return None
-    except ValueError as exc:
-        print(f"[fetch_data] ÉCHEC décodage JSON '{url}' : {exc}", file=sys.stderr)
-        return None
+def append_jsonl(world_id: str, source: str, payload) -> None:
+    world_dir = HISTORY_DIR / world_id
+    world_dir.mkdir(parents=True, exist_ok=True)
+    out_path = world_dir / f"{source}.jsonl"
 
-
-def append_jsonl(monde_id: str, source: str, payload: dict, fetched_at: str) -> None:
-    monde_dir = HISTORY_DIR / monde_id
-    monde_dir.mkdir(parents=True, exist_ok=True)
-    line = {
-        "fetched_at": fetched_at,
-        "source_mise_a_jour": _extract_source_mise_a_jour(payload),
+    source_maj = payload.get("mise_a_jour") if isinstance(payload, dict) else None
+    record = {
+        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source_mise_a_jour": source_maj,
         "data": payload,
     }
-    target = monde_dir / f"{source}.jsonl"
-    with target.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(line, ensure_ascii=False))
-        fh.write("\n")
+    with out_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def main() -> int:
     worlds = load_worlds()
     if not worlds:
-        print(
-            "[fetch_data] Aucun monde valide dans config/worlds.json — rien à collecter.",
-            file=sys.stderr,
-        )
+        print("❌ Aucun monde valide déclaré dans config/worlds.json — rien à faire.", file=sys.stderr)
         return 1
 
-    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    success_count = 0
-    total_count = 0
+    any_success = False
+    for world in worlds:
+        world_id = world["id"]
+        nom = world.get("nom", world_id)
+        base_url = world["base_url"]
 
-    for monde in worlds:
-        monde_id = monde["id"]
-        monde_nom = monde.get("nom", monde_id)
-
-        for source, url_key in SOURCE_URL_KEYS.items():
-            url = monde.get(url_key)
-            if not url:
-                print(
-                    f"[fetch_data] Monde '{monde_nom}' : '{url_key}' absent, source '{source}' ignorée.",
-                    file=sys.stderr,
-                )
-                continue
-
-            total_count += 1
-            payload = fetch_url(url)
-            if payload is None:
-                continue
-
+        for source in SOURCES:
             try:
-                append_jsonl(monde_id, source, payload, fetched_at)
-                success_count += 1
-                print(f"[fetch_data] OK '{monde_nom}'/'{source}' écrit ({fetched_at}).")
-            except OSError as exc:
-                print(f"[fetch_data] ÉCHEC écriture '{monde_nom}'/'{source}' : {exc}", file=sys.stderr)
+                payload = fetch_source(base_url, source)
+                append_jsonl(world_id, source, payload)
+                print(f"✅ {nom} ({world_id}) — {source}.json récupéré et ajouté à l'historique.")
+                any_success = True
+            except Exception as e:  # noqa: BLE001 — on isole volontairement chaque échec
+                print(f"❌ {nom} ({world_id}) — {source}.json a échoué : {e}", file=sys.stderr)
 
-    if success_count == 0:
-        print("[fetch_data] Aucune source n'a pu être collectée, pour aucun monde.", file=sys.stderr)
-        return 1
-
-    print(f"[fetch_data] {success_count}/{total_count} collecte(s) réussie(s) sur {len(worlds)} monde(s).")
-    return 0
+    if not any_success:
+        print("❌ Tous les relevés ont échoué.", file=sys.stderr)
+    return 0 if any_success else 1
 
 
 if __name__ == "__main__":
