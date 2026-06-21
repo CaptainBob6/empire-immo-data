@@ -1,16 +1,12 @@
-{
-  "mondes": [
-    {
-      "id": "monde7",
-      "nom": "Monde 7",
-      "buildings_url": "https://monde7.empireimmo.com/api/buildings.json",
-      "materials_url": "https://monde7.empireimmo.com/api/materials.json"
-    },
-    {
-      "id": "monde8",
-      "nom": "Monde 8",
-      "buildings_url": "https://monde8.empireimmo.com/api/buildings.json",
-      "materials_url": "https://monde8.empireimmo.com/api/materials.json"
-    }
-  ]
-}
+[
+  {
+    "id": "monde7",
+    "nom": "Monde 7",
+    "base_url": "https://monde7.empireimmo.com/api"
+  },
+  {
+    "id": "monde8",
+    "nom": "Monde 8",
+    "base_url": "https://monde8.empireimmo.com/api"
+  }
+]
