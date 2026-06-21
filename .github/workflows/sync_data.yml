@@ -45,3 +45,50 @@ jobs:
             git commit -m "data: sync $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             git push
           fi
+name: Sync Empire Immo Data
+
+# Récupère les APIs publiques d'Empire Immo (Monde 8) toutes les 3h et commit
+# les nouveaux relevés dans data/history/. Tourne sur les serveurs GitHub :
+# continue même si votre ordinateur est éteint.
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # à 00h, 03h, 06h, 09h, 12h, 15h, 18h, 21h (UTC)
+  workflow_dispatch: {}       # bouton "Run workflow" manuel dans l'onglet Actions
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-empire-immo-data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du repo
+        uses: actions/checkout@v4
+
+      - name: Installation de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installation des dépendances
+        run: pip install -r scripts/requirements.txt
+
+      - name: Récupération des données
+        run: python scripts/fetch_data.py
+
+      - name: Commit et push si changement
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/history/*.jsonl
+          if git diff --staged --quiet; then
+            echo "Rien de nouveau à committer."
+          else
+            git commit -m "data: sync $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push
+          fi
