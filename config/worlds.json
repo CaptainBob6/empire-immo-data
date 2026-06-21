@@ -8,5 +8,10 @@
     "id": "monde8",
     "nom": "Monde 8",
     "base_url": "https://monde8.empireimmo.com/api"
+  },
+  {
+    "id": "mondebeta",
+    "nom": "Monde Bêta",
+    "base_url": "https://mondebeta.empireimmo.com/api"
   }
 ]
