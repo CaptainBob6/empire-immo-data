@@ -1,0 +1,37 @@
+name: Synchronisation Empire Immo
+
+on:
+  schedule:
+    # Toutes les 3 heures, comme la synchronisation bâtiments/matériaux existante.
+    - cron: '0 */3 * * *'
+  workflow_dispatch: {}   # permet de relancer manuellement depuis l'onglet "Actions" de GitHub
+
+permissions:
+  contents: write   # nécessaire pour que le job puisse commit/push
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # ── Tes étapes existantes de synchronisation bâtiments/matériaux restent ICI ──
+      # (ne pas les retirer — ce fichier n'est qu'un exemple pour la partie joueurs,
+      # à fusionner avec ton sync_data.yml actuel plutôt qu'à le remplacer entièrement)
+
+      - name: Synchroniser les joueurs (data/history/{monde}/players.json)
+        run: python3 scripts/sync_players.py
+
+      - name: Commit et push si des fichiers ont changé
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --quiet --cached || git commit -m "Sync données Empire Immo ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          git push
