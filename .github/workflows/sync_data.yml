@@ -1,35 +1,29 @@
 name: Synchronisation des données Empire Immo
-
 on:
   schedule:
     - cron: "0 */3 * * *"   # toutes les 3h, UTC
   workflow_dispatch: {}      # déclenchement manuel possible depuis l'onglet Actions
-
 permissions:
   contents: write
-
 concurrency:
   group: empire-immo-sync
   cancel-in-progress: false
-
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Installer les dépendances
         run: pip install -r scripts/requirements.txt
-
       - name: Récupérer les données (tous les mondes de config/worlds.json)
         run: python scripts/fetch_data.py
-
+      - name: Synchroniser les joueurs (data/history/{monde}/players.json)
+        run: python scripts/sync_players.py
       - name: Commit et push si changement
         run: |
           git config user.name "github-actions[bot]"
