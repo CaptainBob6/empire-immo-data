@@ -2,16 +2,19 @@
   {
     "id": "monde7",
     "nom": "Monde 7",
-    "base_url": "https://monde7.empireimmo.com/api"
+    "base_url": "https://monde7.empireimmo.com/api",
+    "players_api_url": "https://monde7.empireimmo.com/api/players.json"
   },
   {
     "id": "monde8",
     "nom": "Monde 8",
-    "base_url": "https://monde8.empireimmo.com/api"
+    "base_url": "https://monde8.empireimmo.com/api",
+    "players_api_url": "https://monde8.empireimmo.com/api/players.json"
   },
   {
     "id": "mondebeta",
     "nom": "Monde Bêta",
-    "base_url": "https://mondebeta.empireimmo.com/api"
+    "base_url": "https://mondebeta.empireimmo.com/api",
+    "players_api_url": "https://mondebeta.empireimmo.com/api/players.json"
   }
 ]
